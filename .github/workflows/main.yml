@@ -178,7 +178,7 @@ jobs:
           DEPLOY_HOST: ${{ secrets.HOST }}
           DEPLOY_USER: ${{ secrets.USER }}
         run: |
-          ssh -i "$RUNNER_TEMP/taski_deploy_key" \
+          ssh -T -i "$RUNNER_TEMP/taski_deploy_key" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/taski_known_hosts" \
@@ -194,7 +194,7 @@ jobs:
           DEPLOY_HOST: ${{ secrets.HOST }}
           DEPLOY_USER: ${{ secrets.USER }}
         run: |
-          ssh -i "$RUNNER_TEMP/taski_deploy_key" \
+          ssh -T -i "$RUNNER_TEMP/taski_deploy_key" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/taski_known_hosts" \
@@ -206,6 +206,18 @@ jobs:
           # Перезапускает все контейнеры Docker Compose
           sudo docker compose -f docker-compose.production.yml down
           sudo docker compose -f docker-compose.production.yml up -d
+          # Ожидаем, пока PostgreSQL начнёт принимать подключения
+          attempt=1
+          until sudo docker compose -f docker-compose.production.yml exec -T db \
+            sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'; do
+            if [ "$attempt" -ge 30 ]; then
+              echo "PostgreSQL did not become ready in 60 seconds" >&2
+              sudo docker compose -f docker-compose.production.yml logs db
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep 2
+          done
           # Выполняет миграции и сбор статики
           sudo docker compose -f docker-compose.production.yml exec -T backend python manage.py migrate
           sudo docker compose -f docker-compose.production.yml exec -T backend python manage.py collectstatic --noinput
